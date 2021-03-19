@@ -50,7 +50,7 @@ class voiceState:
         self._volume = value
 
     @property
-    def isPlaying(self):
+    def is_playing(self):
         return self.voice and self.current
     
     async def audio_player_task(self):

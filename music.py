@@ -26,6 +26,7 @@ class Music(commands.Cog):
     def get_voice_state(self, ctx: commands.Context):
         state = self.voice_states.get(ctx.guild.id)
         if not state:
+            print(self.bot, ctx)
             state = voiceState(self.bot, ctx)
             self.voice_states[ctx.guild.id] = state
 
@@ -225,13 +226,15 @@ class Music(commands.Cog):
         This command automatically searches from various sites if no URL is provided.
         A list of these sites can be found here: https://rg3.github.io/youtube-dl/supportedsites.html
         """
-
+        
         if not ctx.voice_state.voice:
             await ctx.invoke(self._join)
 
         async with ctx.typing():
             try:
+                print('testing')
                 source = await ytdlSource.create_source(ctx, search, loop=self.bot.loop)
+                print('testing')
             except ytdlError as e:
                 await ctx.send('An error occurred while processing this request: {}'.format(str(e)))
             else:

@@ -1,9 +1,10 @@
 import asyncio
 import functools
-
+import sys
 
 import discord
 import youtube_dl
+
 from discord.ext import commands
 from ytdlError import ytdlError
 
@@ -25,6 +26,7 @@ class ytdlSource(discord.PCMVolumeTransformer):
         'default_search': 'auto',
         'source_address': '0.0.0.0',
     }
+
     FFMPEG_OPTIONS = {
         'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5',
         'options': '-vn',
@@ -32,8 +34,8 @@ class ytdlSource(discord.PCMVolumeTransformer):
 
     ytdl = youtube_dl.YoutubeDL(YTDL_OPTIONS)
 
-    def __init__(self, ctx: commands.Context, source: discord.FFmpegPCMAudio, *,data:dict, volume: float = 0.5):
-        super().__init__(source,volume)
+    def __init__(self, ctx: commands.Context, source: discord.FFmpegPCMAudio, *, data: dict, volume: float = 0.5):
+        super().__init__(source, volume)
 
         self.requester = ctx.author
         self.channel = ctx.channel
@@ -41,12 +43,12 @@ class ytdlSource(discord.PCMVolumeTransformer):
 
         self.uploader = data.get('uploader')
         self.uploader_url = data.get('uploader_url')
-        date = data.get('uploader_date')
-        self.upload_date = date[6:8] + '.' + date[4:6] + '.' + date [0:4]
+        date = data.get('upload_date')
+        self.upload_date = date[6:8] + '.' + date[4:6] + '.' + date[0:4]
         self.title = data.get('title')
         self.thumbnail = data.get('thumbnail')
-        self.description = date.get('description')
-        self.duration= self.parse_duration(int(data.get('duration')))
+        self.description = data.get('description')
+        self.duration = self.parse_duration(int(data.get('duration')))
         self.tags = data.get('tags')
         self.url = data.get('webpage_url')
         self.views = data.get('view_count')
@@ -58,7 +60,7 @@ class ytdlSource(discord.PCMVolumeTransformer):
         return '**{0.title}** by **{0.uploader}**'.format(self)
 
     @classmethod
-    async def create_source(cls, ctx:commands.Context, search: str, *, loop: asyncio.BaseEventLoop = None):
+    async def create_source(cls, ctx: commands.Context, search: str, *, loop: asyncio.BaseEventLoop = None):
         loop = loop or asyncio.get_event_loop()
 
         partial = functools.partial(cls.ytdl.extract_info, search, download=False, process=False)
@@ -66,7 +68,7 @@ class ytdlSource(discord.PCMVolumeTransformer):
 
         if data is None:
             raise ytdlError('Couldn\'t find anything that matches `{}`'.format(search))
-    
+
         if 'entries' not in data:
             process_info = data
         else:
@@ -75,19 +77,19 @@ class ytdlSource(discord.PCMVolumeTransformer):
                 if entry:
                     process_info = entry
                     break
-      
-        if process_info is None:
-            raise ytdlError('Couldn\'t find anything that matches `{}`'.format(search))
+
+            if process_info is None:
+                raise ytdlError('Couldn\'t find anything that matches `{}`'.format(search))
 
         webpage_url = process_info['webpage_url']
-        partial = functools.partial(cls.ytdl.extract_info, webpage_url,download = False)
+        partial = functools.partial(cls.ytdl.extract_info, webpage_url, download=False)
         processed_info = await loop.run_in_executor(None, partial)
 
         if processed_info is None:
             raise ytdlError('Couldn\'t fetch `{}`'.format(webpage_url))
 
         if 'entries' not in processed_info:
-            info= processed_info
+            info = processed_info
         else:
             info = None
             while info is None:
@@ -99,7 +101,7 @@ class ytdlSource(discord.PCMVolumeTransformer):
         return cls(ctx, discord.FFmpegPCMAudio(info['url'], **cls.FFMPEG_OPTIONS), data=info)
 
     @staticmethod
-    def parse_duration(duration:int):
+    def parse_duration(duration: int):
         minutes, seconds = divmod(duration, 60)
         hours, minutes = divmod(minutes, 60)
         days, hours = divmod(hours, 24)
@@ -113,5 +115,5 @@ class ytdlSource(discord.PCMVolumeTransformer):
             duration.append('{} minutes'.format(minutes))
         if seconds > 0:
             duration.append('{} seconds'.format(seconds))
-        
-        return ", ".join(duration)
+
+        return ', '.join(duration)
