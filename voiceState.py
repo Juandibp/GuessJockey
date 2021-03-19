@@ -11,7 +11,7 @@ from discord.ext import commands
 import youtube_dl
 from async_timeout import timeout
 
-from songQueue import songQueue
+from songQueue import SongQueue
 from voiceError import VoiceError
 
 class voiceState:
@@ -22,7 +22,7 @@ class voiceState:
         self.current = None
         self.voice = None
         self.next = asyncio.Event()
-        self.songs = songQueue()
+        self.songs = SongQueue()
 
         self._loop = False
         self._volume = 0.5

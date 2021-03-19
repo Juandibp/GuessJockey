@@ -8,7 +8,7 @@ import youtube_dl
 from music import Music
 
 #Silencing Youtube errors (Silence Wench)
-youtube_dl.utils.bug_reports_message = lambda: ''
+#youtube_dl.utils.bug_reports_message = lambda: ''
 
 
 prefix = "$"

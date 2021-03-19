@@ -2,9 +2,9 @@ import asyncio
 import itertools
 import random
 
-class songQueue(asyncio.Queue):
-    def __getItem__(self, item):
-        if isinstance(item,slice):
+class SongQueue(asyncio.Queue):
+    def __getitem__(self, item):
+        if isinstance(item, slice):
             return list(itertools.islice(self._queue, item.start, item.stop, item.step))
         else:
             return self._queue[item]
