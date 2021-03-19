@@ -1,25 +1,18 @@
 import os
 
-
-import discord
 from discord.ext import commands
-import youtube_dl
-
-from music import Music
+from Music import Music
 
 #Silencing Youtube errors (Silence Wench)
 #youtube_dl.utils.bug_reports_message = lambda: ''
 
 
-prefix = "$"
-
-client = commands.Bot(prefix, description='Yet another music bot, but this time for a game!')
-client.add_cog(Music(client))
+bot = commands.Bot('$', description='Yet another music bot.')
+bot.add_cog(Music(bot))
 
 
-@client.event
+@bot.event
 async def on_ready():
-    print('Logged in as {0.user}'.format(client))
+    print('Logged in as:\n{0.user.name}\n{0.user.id}'.format(bot))
 
-
-client.run(os.getenv("TOKEN"))
+bot.run(os.getenv("TOKEN"))

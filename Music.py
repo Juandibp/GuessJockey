@@ -1,22 +1,14 @@
-import asyncio
-import functools
-import itertools
-import math
-import random
-import os
 
+import math
 
 import discord
 from discord.ext import commands
-import youtube_dl
-from async_timeout import timeout
 
-from voiceState import voiceState
-from voiceError import VoiceError
-from ytdlSource import ytdlSource
-from ytdlError import ytdlError
-from song import Song
-
+from VoiceState import VoiceState
+from VoiceError import VoiceError
+from YTDLSource import YTDLSource
+from YTDLError import YTDLError
+from Song import Song
 
 class Music(commands.Cog):
     def __init__(self, bot: commands.Bot):
@@ -26,8 +18,7 @@ class Music(commands.Cog):
     def get_voice_state(self, ctx: commands.Context):
         state = self.voice_states.get(ctx.guild.id)
         if not state:
-            print(self.bot, ctx)
-            state = voiceState(self.bot, ctx)
+            state = VoiceState(self.bot, ctx)
             self.voice_states[ctx.guild.id] = state
 
         return state
@@ -124,16 +115,17 @@ class Music(commands.Cog):
             ctx.voice_state.voice.resume()
             await ctx.message.add_reaction('⏯')
 
-    @commands.command(name='stop')
+    @commands.command(name='stop', aliases=['clear'])
     @commands.has_permissions(manage_guild=True)
     async def _stop(self, ctx: commands.Context):
         """Stops playing song and clears the queue."""
 
         ctx.voice_state.songs.clear()
-
-        if not ctx.voice_state.is_playing:
+            
+        if ctx.voice_state.is_playing:
             ctx.voice_state.voice.stop()
             await ctx.message.add_reaction('⏹')
+
 
     @commands.command(name='skip')
     async def _skip(self, ctx: commands.Context):
@@ -226,22 +218,20 @@ class Music(commands.Cog):
         This command automatically searches from various sites if no URL is provided.
         A list of these sites can be found here: https://rg3.github.io/youtube-dl/supportedsites.html
         """
-        
+
         if not ctx.voice_state.voice:
             await ctx.invoke(self._join)
 
         async with ctx.typing():
             try:
-                print('testing')
-                source = await ytdlSource.create_source(ctx, search, loop=self.bot.loop)
-                print('testing')
-            except ytdlError as e:
+                source = await YTDLSource.create_source(ctx, search, loop=self.bot.loop)
+            except YTDLError as e:
                 await ctx.send('An error occurred while processing this request: {}'.format(str(e)))
             else:
                 song = Song(source)
 
                 await ctx.voice_state.songs.put(song)
-                await ctx.send('Enqueued {}'.format(str(source)))
+                await ctx.send('Queued {}'.format(str(source)))
 
     @_join.before_invoke
     @_play.before_invoke
