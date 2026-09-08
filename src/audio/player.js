@@ -18,6 +18,7 @@ function connect(channel) {
     adapterCreator: channel.guild.voiceAdapterCreator,
     selfDeaf: true,
     selfMute: false,
+    debug: Boolean(process.env.VOICE_DEBUG),
   });
 }
 

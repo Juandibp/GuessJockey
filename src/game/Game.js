@@ -6,6 +6,7 @@ const {
   ActionRowBuilder,
   ButtonBuilder,
   ButtonStyle,
+  MessageFlags,
 } = require('discord.js');
 const {
   entersState,
@@ -138,34 +139,34 @@ class Game {
         try {
           if (i.customId === 'gj_join') {
             this.addPlayer(i.user);
-            await i.reply({ content: "✅ You're in the game!", ephemeral: true });
+            await i.reply({ content: "✅ You're in the game!", flags: MessageFlags.Ephemeral });
             refresh();
           } else if (i.customId === 'gj_leave') {
             this.removePlayer(i.user.id);
-            await i.reply({ content: '👋 You left the lobby.', ephemeral: true });
+            await i.reply({ content: '👋 You left the lobby.', flags: MessageFlags.Ephemeral });
             refresh();
           } else if (i.customId === 'gj_start') {
             if (!this.isHostOrMod(i.user.id, i.memberPermissions)) {
-              await i.reply({ content: 'Only the host can start the game.', ephemeral: true });
+              await i.reply({ content: 'Only the host can start the game.', flags: MessageFlags.Ephemeral });
               return;
             }
             if (this.players.size < this.minPlayers) {
               await i.reply({
                 content: `Need at least ${this.minPlayers} players to start.`,
-                ephemeral: true,
+                flags: MessageFlags.Ephemeral,
               });
               return;
             }
             outcome = 'started';
-            await i.reply({ content: '🎬 Starting…', ephemeral: true });
+            await i.reply({ content: '🎬 Starting…', flags: MessageFlags.Ephemeral });
             collector.stop('started');
           } else if (i.customId === 'gj_cancel') {
             if (!this.isHostOrMod(i.user.id, i.memberPermissions)) {
-              await i.reply({ content: 'Only the host can cancel.', ephemeral: true });
+              await i.reply({ content: 'Only the host can cancel.', flags: MessageFlags.Ephemeral });
               return;
             }
             outcome = 'cancelled';
-            await i.reply({ content: 'Lobby cancelled.', ephemeral: true });
+            await i.reply({ content: 'Lobby cancelled.', flags: MessageFlags.Ephemeral });
             collector.stop('cancelled');
           }
         } catch (err) {
@@ -252,6 +253,21 @@ class Game {
     // 3. Join voice and wire up a single reusable audio player.
     this.connection = connect(this.voiceChannel);
     this.connection.on('error', (e) => console.error('voice connection error:', e));
+    if (process.env.VOICE_DEBUG) {
+      this.connection.on('debug', (m) => console.log('[voice:debug]', m));
+    }
+    this.connection.on('stateChange', (oldS, newS) => {
+      console.log(`[voice] ${oldS.status} -> ${newS.status}`);
+      // Surface the underlying voice-websocket close code / handshake step.
+      const net = newS.networking;
+      if (net && net !== oldS.networking) {
+        net.on('error', (e) => console.error('[voice:net] error:', e.message));
+        net.on('close', (code) => console.error('[voice:net] ws closed, code', code));
+        net.on('stateChange', (o, n) =>
+          console.log(`[voice:net] ${o.code ?? '?'} -> ${n.code ?? '?'}`)
+        );
+      }
+    });
     this.connection.on(VoiceConnectionStatus.Disconnected, async () => {
       try {
         await Promise.race([
@@ -262,7 +278,21 @@ class Game {
         this.finish('disconnected').catch(() => {});
       }
     });
-    await entersState(this.connection, VoiceConnectionStatus.Ready, 30_000);
+
+    try {
+      await entersState(this.connection, VoiceConnectionStatus.Ready, 20_000);
+    } catch {
+      const stuckAt = this.connection.state.status;
+      try {
+        this.connection.destroy();
+      } catch {}
+      throw new Error(
+        `voice connection never became ready (stuck at "${stuckAt}"). ` +
+          'If it stalls at "connecting", UDP is being blocked — check Windows Firewall / ' +
+          'any VPN, and allow node.exe. If it stalls at "signalling", the bot is missing ' +
+          'the Connect permission or the GuildVoiceStates intent.'
+      );
+    }
 
     this.player = createPlayer();
     this.player.on('error', (e) => console.error('audio player error:', e.message));

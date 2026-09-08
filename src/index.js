@@ -6,8 +6,9 @@ const {
   Events,
   PermissionFlagsBits,
   ChannelType,
+  MessageFlags,
 } = require('discord.js');
-require('libsodium-wrappers'); // load the voice encryption backend
+require('@noble/ciphers/chacha'); // ensure the voice encryption backend resolves
 
 const { token, defaults, deezer } = require('./config');
 const manager = require('./game/GameManager');
@@ -15,7 +16,7 @@ const { Game } = require('./game/Game');
 const { parsePlaylistId } = require('./deezer');
 const embeds = require('./ui/embeds');
 
-const EPHEMERAL = { ephemeral: true };
+const EPHEMERAL = { flags: MessageFlags.Ephemeral };
 
 const client = new Client({
   intents: [
