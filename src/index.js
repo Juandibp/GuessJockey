@@ -185,6 +185,20 @@ client.on(Events.MessageCreate, (message) => {
 
 process.on('unhandledRejection', (err) => console.error('unhandledRejection:', err));
 
+// Clean shutdown so systemd restarts don't leave a ghost gateway/voice session.
+for (const sig of ['SIGINT', 'SIGTERM']) {
+  process.once(sig, () => {
+    console.log(`${sig} received — shutting down.`);
+    for (const game of manager.games.values()) {
+      game.finish('shutdown').catch(() => {});
+    }
+    try {
+      client.destroy();
+    } catch {}
+    setTimeout(() => process.exit(0), 1500).unref();
+  });
+}
+
 if (!token) {
   console.error('Missing DISCORD_TOKEN in .env');
   process.exit(1);

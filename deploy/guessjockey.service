@@ -1,0 +1,41 @@
+[Unit]
+Description=Guess Jockey Discord bot
+Documentation=https://github.com/your/repo
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=guessjockey
+Group=guessjockey
+WorkingDirectory=/opt/guessjockey
+# dotenv reads .env from WorkingDirectory. Keep it: chmod 600, owned by guessjockey.
+ExecStart=/usr/bin/node src/index.js
+Environment=NODE_ENV=production
+
+# Auto-restart on crash; start on boot via `systemctl enable`.
+Restart=always
+RestartSec=3
+# Give the SIGINT/SIGTERM handler time to disconnect cleanly.
+KillSignal=SIGTERM
+TimeoutStopSec=15
+
+# --- sandboxing / hardening ------------------------------------------------
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=/opt/guessjockey
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+RestrictRealtime=true
+LockPersonality=true
+# Node's JIT needs writable+executable memory, so W^X must stay off.
+MemoryDenyWriteExecute=false
+
+[Install]
+WantedBy=multi-user.target
