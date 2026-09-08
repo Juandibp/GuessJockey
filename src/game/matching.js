@@ -12,13 +12,40 @@ const EDITION =
 const DIACRITICS = /[̀-ͯ]/g;
 
 /**
+ * Visual look-alikes used in band/song styling, mapped to the ASCII letter they
+ * resemble (NOT a linguistically correct transliteration): "KoЯn" -> "korn",
+ * "P!nk" -> "pink", "Ke$ha" -> "kesha", "Sigur Rós" handled by diacritics.
+ */
+const CONFUSABLES = {
+  // Cyrillic homoglyphs
+  а: 'a', б: 'b', в: 'b', г: 'r', д: 'a', е: 'e', ж: 'x', з: '3', и: 'n',
+  й: 'n', к: 'k', л: 'a', м: 'm', н: 'h', о: 'o', п: 'n', р: 'p', с: 'c',
+  т: 't', у: 'y', ф: 'o', х: 'x', ц: 'u', ч: '4', ш: 'w', щ: 'w', ъ: '',
+  ы: 'bi', ь: '', э: 'e', ю: 'io', я: 'r',
+  // Greek homoglyphs
+  α: 'a', β: 'b', γ: 'r', δ: 'd', ε: 'e', ζ: 'z', η: 'n', θ: 'o', ι: 'i',
+  κ: 'k', λ: 'a', μ: 'u', ν: 'v', ξ: 'e', ο: 'o', π: 'n', ρ: 'p', σ: 'o',
+  ς: 's', τ: 't', υ: 'u', φ: 'o', χ: 'x', ψ: 'w', ω: 'w',
+  // Latin extended + symbols that stand in for a letter
+  ø: 'o', đ: 'd', ð: 'd', ł: 'l', þ: 'p', ß: 'ss', æ: 'ae', œ: 'oe',
+  ə: 'e', ǝ: 'e', ɪ: 'i', ʌ: 'v', '∀': 'a', '∆': 'a', '∂': 'd',
+  $: 's', '€': 'e', '£': 'l', '¥': 'y', µ: 'u', '@': 'a', '!': 'i',
+  '©': 'c', '®': 'r', '™': 'tm', '†': 't', '×': 'x',
+};
+
+function deConfusable(s) {
+  let out = '';
+  for (const ch of s) out += CONFUSABLES[ch] ?? ch;
+  return out;
+}
+
+/**
  * Fold a title/artist/guess down to a bare comparable form:
- * lowercase, no accents, no bracketed asides, no "feat", no edition tags,
- * "&" -> "and", punctuation stripped, leading articles dropped.
+ * lowercase, look-alikes -> ASCII, no accents, no bracketed asides, no "feat",
+ * no edition tags, "&" -> "and", punctuation stripped, leading articles dropped.
  */
 function normalize(str) {
-  return String(str || '')
-    .toLowerCase()
+  return deConfusable(String(str || '').toLowerCase())
     .normalize('NFD')
     .replace(DIACRITICS, '')
     .replace(/\(.*?\)|\[.*?\]/g, ' ')
