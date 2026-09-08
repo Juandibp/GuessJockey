@@ -52,21 +52,52 @@ function makeClipResource(url, { start = 0, duration = 20 } = {}) {
       '-loglevel', 'error',
     ],
   });
+
+  // Surface ffmpeg's own errors (can't open URL, no libopus, 403, …).
+  const stderr = [];
+  transcoder.process?.stderr?.on('data', (d) => {
+    const s = d.toString().trim();
+    if (s) stderr.push(s);
+  });
+  transcoder.on('error', (e) => console.error('[ffmpeg] error:', e.message));
+  transcoder.process?.on('close', (code) => {
+    if (code && code !== 255) {
+      console.error(`[ffmpeg] exited ${code}: ${stderr.join(' | ') || '(no stderr)'}`);
+    } else if (stderr.length) {
+      console.error('[ffmpeg]', stderr.join(' | '));
+    }
+  });
+
   return createAudioResource(transcoder, { inputType: StreamType.OggOpus });
 }
 
 /**
  * Play one clip on an already-subscribed player and resolve when it finishes.
+ * Throws if the clip never really played (ffmpeg/preview failure), so the
+ * caller can skip the round instead of pretending it happened.
  */
 async function playClip(player, url, opts = {}) {
   const resource = makeClipResource(url, opts);
   player.play(resource);
-  await entersState(player, AudioPlayerStatus.Playing, 12_000);
+
+  try {
+    await entersState(player, AudioPlayerStatus.Playing, 12_000);
+  } catch {
+    try { player.stop(true); } catch {}
+    throw new Error('clip never started playing (ffmpeg could not open the preview)');
+  }
+
+  const startedAt = Date.now();
   await entersState(
     player,
     AudioPlayerStatus.Idle,
     (opts.duration ?? 20) * 1000 + 20_000
   );
+
+  const playedMs = Date.now() - startedAt;
+  if (playedMs < 1500) {
+    throw new Error(`clip produced almost no audio (played ${playedMs}ms)`);
+  }
 }
 
 module.exports = { connect, createPlayer, playClip };

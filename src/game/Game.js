@@ -334,18 +334,42 @@ class Game {
       .catch(() => {});
     await sleep(3000);
 
+    let consecutiveFailures = 0;
+
     for (let n = 1; n <= this.options.rounds; n++) {
       if (this._ended) break;
-      const track = this.tracks.shift();
+      let track = this.tracks.shift();
       if (!track) break;
 
-      try {
-        await this.playRound(track, n);
-      } catch (err) {
-        console.error(`round ${n} error:`, err.message);
+      let played = false;
+      for (let attempt = 0; attempt < 2 && !played && !this._ended; attempt++) {
+        try {
+          await this.playRound(track, n);
+          played = true;
+        } catch (err) {
+          console.error(`round ${n} attempt ${attempt + 1} failed:`, err.message);
+          if (attempt === 0 && this.tracks.length) {
+            track = this.tracks.shift(); // swap in a spare and retry once
+          }
+        }
+      }
+
+      if (played) {
+        consecutiveFailures = 0;
+      } else {
+        consecutiveFailures++;
         await this.guessChannel
           ?.send(`⚠️ Round ${n} hit a snag — moving on.`)
           .catch(() => {});
+        if (consecutiveFailures >= 3) {
+          await this.guessChannel
+            ?.send(
+              '🛑 Audio playback keeps failing on the server. Ending the game — ' +
+                'check the logs (`journalctl -u guessjockey`) for ffmpeg / preview errors.'
+            )
+            .catch(() => {});
+          break;
+        }
       }
 
       if (!this._ended && n < this.options.rounds) {
