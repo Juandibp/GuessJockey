@@ -12,8 +12,11 @@ User=guessjockey
 Group=guessjockey
 WorkingDirectory=/opt/guessjockey
 # dotenv reads .env from WorkingDirectory. Keep it: chmod 600, owned by guessjockey.
-ExecStart=/usr/bin/node src/index.js
+# This bot needs Node >= 22.12 (@discordjs/voice). It runs on a dedicated Node in
+# /opt/node22 so the system Node (used by other apps) is left untouched.
+ExecStart=/opt/node22/bin/node src/index.js
 Environment=NODE_ENV=production
+Environment=PATH=/opt/node22/bin:/usr/local/bin:/usr/bin:/bin
 
 # Auto-restart on crash; start on boot via `systemctl enable`.
 Restart=always

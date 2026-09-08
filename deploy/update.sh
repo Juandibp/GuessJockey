@@ -6,12 +6,13 @@ set -euo pipefail
 APP_DIR=/opt/guessjockey
 APP_USER=guessjockey
 SERVICE=guessjockey
+NODE_BIN=/opt/node22/bin        # dedicated Node 22, separate from system Node
 
 echo "==> Fetching latest code"
 sudo -u "$APP_USER" -H git -C "$APP_DIR" pull --ff-only
 
-echo "==> Installing dependencies"
-sudo -u "$APP_USER" -H bash -lc "cd '$APP_DIR' && npm ci --omit=dev"
+echo "==> Installing dependencies (Node $($NODE_BIN/node -v))"
+sudo -u "$APP_USER" -H bash -lc "cd '$APP_DIR' && PATH=$NODE_BIN:\$PATH '$NODE_BIN/npm' ci --omit=dev"
 
 echo "==> Restarting $SERVICE"
 sudo systemctl restart "$SERVICE"

@@ -8,28 +8,88 @@ RHEL/Alma/Rocky swap `apt` for `dnf` and `/usr/sbin/nologin` paths as noted.
 The bot makes **only outbound** connections (Discord gateway/voice, Deezer). No
 inbound ports, no reverse proxy, no domain needed.
 
+> **This bot needs Node >= 22.12** (`@discordjs/voice`). If the box already runs
+> other apps on an older Node, **do not upgrade the system Node** — install a
+> dedicated Node 22 in `/opt/node22` and point only this service at it (§1).
+> Nothing the other apps use changes.
+
 ---
 
-## 1. System packages
+## 0. Audit what's already running (do this first)
+
+Paste this and keep the output; you'll compare against it after deploying.
 
 ```bash
-sudo apt update && sudo apt -y upgrade
-sudo apt -y install curl git ca-certificates
+cat /etc/os-release | head -2
+echo "system node: $(node -v 2>/dev/null) at $(command -v node)"
 
-# Node.js 22 LTS from NodeSource
-curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
-sudo apt -y install nodejs
+# Listening sockets = every web server / app that serves traffic
+sudo ss -tlnp
 
-# Build tools — only needed if an optional native dep (DAVE E2EE) has no prebuilt
-# binary for your arch. Cheap insurance; skip if you want and add later only if
-# `npm ci` complains.
-sudo apt -y install build-essential python3
+# Running services (minus the usual OS noise)
+systemctl list-units --type=service --state=running --no-pager \
+  | grep -Ev 'systemd-|dbus|cron|ssh|getty|rsyslog|polkit|networkd|resolved|timesyncd|unattended'
 
-node -v   # expect v22.x
+# Node processes and which binary each uses
+ps -eo pid,user,comm,args | grep -i -- node | grep -v grep
+for p in $(pgrep -x node); do echo "pid $p -> $(readlink -f /proc/$p/exe)"; done
+
+# Process managers / reverse proxies
+command -v pm2 >/dev/null && pm2 list || echo "no pm2 for $(whoami)"
+systemctl is-active nginx apache2 caddy 2>/dev/null
+ls /etc/nginx/sites-enabled/ /etc/apache2/sites-enabled/ 2>/dev/null
+
+# How the system Node was installed (so an accidental `apt upgrade` can't move it)
+ls -l /etc/apt/sources.list.d/ | grep -i node || true
+apt-mark showhold | grep -i node || echo "node not held"
+
+# Cron jobs that might invoke node
+sudo bash -c 'for u in $(cut -f1 -d: /etc/passwd); do c=$(crontab -l -u $u 2>/dev/null); [ -n "$c" ] && echo "### $u" && echo "$c"; done'
+ls -l /etc/cron.d/ 2>/dev/null
 ```
 
+You're checking: which ports/sites must still work afterwards, and confirming the
+other apps run on **the system `node`**, not on something we're about to change.
+
+---
+
+## 1. Install a dedicated Node 22 (leaves system Node alone)
+
+```bash
+sudo apt update
+sudo apt -y install curl git ca-certificates xz-utils
+
+cd /tmp
+VER=v22.20.0   # latest 22.x LTS — check https://nodejs.org/dist/latest-v22.x/
+ARCH=linux-x64 # use linux-arm64 on an ARM Linode
+curl -fsSLO "https://nodejs.org/dist/$VER/node-$VER-$ARCH.tar.xz"
+sudo mkdir -p /opt/node22
+sudo tar -xJf "node-$VER-$ARCH.tar.xz" -C /opt/node22 --strip-components=1
+
+/opt/node22/bin/node -v          # v22.20.0
+node -v                          # UNCHANGED — still your old system Node
+```
+
+Nothing is added to `PATH`, so `node`/`npm` for every other app and user stay
+exactly as they were. Only this bot's systemd unit and `deploy/update.sh`
+reference `/opt/node22/bin`.
+
+To upgrade within 22.x later: re-extract a newer tarball into `/opt/node22` and
+`systemctl restart guessjockey`.
+
 `ffmpeg` is **not** required system-wide — `ffmpeg-static` pulls a Linux binary
-during `npm ci`.
+during `npm ci`. Build tools generally aren't needed either (`opusscript` is pure
+JS, AES-GCM uses Node's built-in crypto); add `build-essential python3` only if
+`npm ci` prints a node-gyp error for the optional DAVE dep.
+
+---
+
+## 2. Service user and app directory
+
+```bash
+sudo useradd --system --create-home --home-dir /opt/guessjockey --shell /bin/bash guessjockey
+sudo install -d -o guessjockey -g guessjockey /opt/guessjockey
+```
 
 ---
 
@@ -72,11 +132,14 @@ rsync -avz --delete \
 
 ---
 
-## 4. Install dependencies
+## 4. Install dependencies (with the dedicated Node 22)
 
 ```bash
-sudo -u guessjockey -H bash -lc 'cd /opt/guessjockey && npm ci --omit=dev'
+sudo -u guessjockey -H bash -lc \
+  'cd /opt/guessjockey && PATH=/opt/node22/bin:$PATH /opt/node22/bin/npm ci --omit=dev'
 ```
+
+The `PATH=` prefix makes any build step (e.g. `ffmpeg-static`) use Node 22 too.
 
 ---
 
@@ -108,7 +171,8 @@ It's already in `.gitignore`, so it is never committed.
 ## 6. Register the slash command (one-time, and after any command change)
 
 ```bash
-sudo -u guessjockey -H bash -lc 'cd /opt/guessjockey && npm run deploy'
+sudo -u guessjockey -H bash -lc \
+  'cd /opt/guessjockey && /opt/node22/bin/node src/deploy-commands.js'
 ```
 
 Expect `🔑 Token OK …` then `✅ Registered 1 global command(s)`. Global commands
@@ -120,8 +184,9 @@ can take up to ~1h to appear the very first time.
 
 ```bash
 sudo cp /opt/guessjockey/deploy/guessjockey.service /etc/systemd/system/guessjockey.service
-# Confirm the node path matches your box:
-which node   # if not /usr/bin/node, edit ExecStart in the unit file
+
+# The unit points ExecStart at /opt/node22/bin/node. Confirm it exists:
+/opt/node22/bin/node -v
 
 sudo systemctl daemon-reload
 sudo systemctl enable --now guessjockey
@@ -138,14 +203,42 @@ You want to see `🎧 Logged in as Guess Jockey#8431`.
 
 ---
 
+## 7b. Confirm the other apps are untouched
+
+```bash
+node -v                    # still your ORIGINAL system version (e.g. v20.20.x)
+sudo ss -tlnp              # same ports listening as in §0
+```
+
+Then hit each site/service you noted in §0:
+
+```bash
+systemctl is-active nginx apache2 <your-other-service>   # active
+curl -sI http://127.0.0.1:<port> | head -1               # per local app port
+command -v pm2 >/dev/null && pm2 list                     # all "online"
+```
+
+Load the public URLs in a browser. Check for fresh errors:
+
+```bash
+journalctl --since "10 min ago" -p warning --no-pager | tail -50
+```
+
+Because we never ran `apt install nodejs` or changed `PATH`, the system Node and
+every process using it are byte-for-byte what they were. If anything *does* look
+off, it's coincidental — `sudo systemctl restart <that-service>` and it's back;
+stopping `guessjockey` cannot affect it.
+
+---
+
 ## 8. Updates / redeploys
 
 ```bash
 cd /opt/guessjockey && bash deploy/update.sh
 ```
 
-It does `git pull` → `npm ci` → `systemctl restart` (as the right users) and
-prints status. Run `npm run deploy` too if you changed `src/commands.js`.
+It does `git pull` → `npm ci` (with `/opt/node22`) → `systemctl restart` and
+prints status. Re-run the §6 command too if you changed `src/commands.js`.
 
 Manual control:
 
@@ -200,7 +293,9 @@ only if you're in hundreds of servers.
 
 | Symptom | Check |
 | --- | --- |
-| `401 Unauthorized` on `npm run deploy` | Token wrong/rotated. `npm run deploy` prints a precise reason now. |
+| `401 Unauthorized` when registering | Token wrong/rotated. `src/deploy-commands.js` prints a precise reason now. |
+| `EBADENGINE` / `Unsupported engine` on `npm ci` | You ran system `npm` (Node 20). Use `/opt/node22/bin/npm` as shown in §4. |
+| `systemd` fails with `203/EXEC` or `no such file` | `/opt/node22/bin/node` missing — redo §1, or fix `ExecStart` path in the unit. |
 | Service keeps restarting | `journalctl -u guessjockey -n 100 --no-pager` — usually a bad `.env` or missing dependency. |
 | Joins voice, no audio, `stuck at "connecting"` | UDP egress blocked. Check Linode Cloud Firewall outbound = Accept all; check `ufw` didn't add outbound rules. |
 | `stuck at "signalling"` | Bot missing **Connect** in that voice channel, or `GuildVoiceStates` intent off. |
@@ -213,5 +308,5 @@ Handy:
 systemctl status guessjockey
 journalctl -u guessjockey -f
 journalctl -u guessjockey --since "10 min ago" --no-pager
-sudo -u guessjockey -H bash -lc 'cd /opt/guessjockey && node -e "console.log(require(\"@discordjs/voice\").generateDependencyReport())"'
+sudo -u guessjockey -H bash -lc 'cd /opt/guessjockey && /opt/node22/bin/node -e "console.log(require(\"@discordjs/voice\").generateDependencyReport())"'
 ```
