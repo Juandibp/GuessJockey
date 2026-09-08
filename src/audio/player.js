@@ -9,7 +9,7 @@ const {
   StreamType,
   NoSubscriberBehavior,
 } = require('@discordjs/voice');
-const prism = require('prism-media');
+const { spawn, spawnSync } = require('node:child_process');
 
 function connect(channel) {
   return joinVoiceChannel({
@@ -29,46 +29,88 @@ function createPlayer() {
 }
 
 /**
- * Transcode a slice of the Deezer MP3 preview straight to Ogg/Opus with
- * short fades, so Discord can play it with no extra re-encoding step.
+ * Pick an ffmpeg binary. Order: $FFMPEG_PATH -> system `ffmpeg` (full build,
+ * has working HTTPS) -> the `ffmpeg-static` bundle (fallback for dev machines
+ * with no system ffmpeg). prism-media picks ffmpeg-static first with no way to
+ * override, and its bundle can't open HTTPS URLs on some hosts, so we resolve
+ * and spawn ffmpeg ourselves.
+ */
+function resolveFfmpeg() {
+  const candidates = [];
+  if (process.env.FFMPEG_PATH) candidates.push(process.env.FFMPEG_PATH);
+  candidates.push('ffmpeg');
+  try {
+    const s = require('ffmpeg-static');
+    if (s) candidates.push(s.path || s);
+  } catch {
+    /* not installed — fine */
+  }
+
+  const tried = [];
+  for (const bin of candidates) {
+    try {
+      const r = spawnSync(bin, ['-version'], { windowsHide: true });
+      if (r.status === 0) return bin;
+      tried.push(`${bin} (exit ${r.status})`);
+    } catch (e) {
+      tried.push(`${bin} (${e.code || e.message})`);
+    }
+  }
+  console.error('[ffmpeg] no working binary found; tried:', tried.join(', '));
+  return 'ffmpeg';
+}
+
+const FFMPEG_BIN = resolveFfmpeg();
+console.log('[ffmpeg] using:', FFMPEG_BIN);
+
+/**
+ * Transcode a slice of the Deezer MP3 preview to Ogg/Opus (with short fades) so
+ * Discord can play it with no extra re-encoding step.
  */
 function makeClipResource(url, { start = 0, duration = 20 } = {}) {
   const fadeOutStart = Math.max(0, duration - 1);
-  const transcoder = new prism.FFmpeg({
-    args: [
-      '-ss', String(start),
-      '-reconnect', '1',
-      '-reconnect_streamed', '1',
-      '-reconnect_delay_max', '2',
-      '-i', url,
-      '-t', String(duration),
-      '-vn',
-      '-af', `afade=t=in:st=0:d=0.75,afade=t=out:st=${fadeOutStart}:d=1`,
-      '-c:a', 'libopus',
-      '-b:a', '96k',
-      '-ar', '48000',
-      '-ac', '2',
-      '-f', 'ogg',
-      '-loglevel', 'error',
-    ],
+  const args = [
+    '-ss', String(start),
+    '-reconnect', '1',
+    '-reconnect_streamed', '1',
+    '-reconnect_delay_max', '2',
+    '-i', url,
+    '-t', String(duration),
+    '-vn',
+    '-af', `afade=t=in:st=0:d=0.75,afade=t=out:st=${fadeOutStart}:d=1`,
+    '-c:a', 'libopus',
+    '-b:a', '96k',
+    '-ar', '48000',
+    '-ac', '2',
+    '-f', 'ogg',
+    '-loglevel', 'error',
+    'pipe:1',
+  ];
+
+  const child = spawn(FFMPEG_BIN, args, {
+    stdio: ['ignore', 'pipe', 'pipe'],
+    windowsHide: true,
   });
 
-  // Surface ffmpeg's own errors (can't open URL, no libopus, 403, …).
-  const stderr = [];
-  transcoder.process?.stderr?.on('data', (d) => {
+  const errs = [];
+  child.stderr.on('data', (d) => {
     const s = d.toString().trim();
-    if (s) stderr.push(s);
+    if (s) errs.push(s);
   });
-  transcoder.on('error', (e) => console.error('[ffmpeg] error:', e.message));
-  transcoder.process?.on('close', (code) => {
-    if (code && code !== 255) {
-      console.error(`[ffmpeg] exited ${code}: ${stderr.join(' | ') || '(no stderr)'}`);
-    } else if (stderr.length) {
-      console.error('[ffmpeg]', stderr.join(' | '));
+  child.on('error', (e) => console.error('[ffmpeg] spawn error:', e.message));
+  child.on('close', (code) => {
+    if (code) {
+      console.error(`[ffmpeg] exit ${code}: ${errs.join(' | ') || '(no stderr)'}`);
+    } else if (errs.length) {
+      console.error('[ffmpeg]', errs.join(' | '));
     }
   });
+  // If the player tears the stream down early, don't leave ffmpeg running.
+  child.stdout.once('close', () => {
+    if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL');
+  });
 
-  return createAudioResource(transcoder, { inputType: StreamType.OggOpus });
+  return createAudioResource(child.stdout, { inputType: StreamType.OggOpus });
 }
 
 /**
@@ -83,7 +125,9 @@ async function playClip(player, url, opts = {}) {
   try {
     await entersState(player, AudioPlayerStatus.Playing, 12_000);
   } catch {
-    try { player.stop(true); } catch {}
+    try {
+      player.stop(true);
+    } catch {}
     throw new Error('clip never started playing (ffmpeg could not open the preview)');
   }
 

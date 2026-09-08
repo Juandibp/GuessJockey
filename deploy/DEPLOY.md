@@ -57,7 +57,7 @@ other apps run on **the system `node`**, not on something we're about to change.
 
 ```bash
 sudo apt update
-sudo apt -y install curl git ca-certificates xz-utils
+sudo apt -y install curl git ca-certificates xz-utils ffmpeg
 
 cd /tmp
 VER=v22.20.0   # latest 22.x LTS — check https://nodejs.org/dist/latest-v22.x/
@@ -77,10 +77,22 @@ reference `/opt/node22/bin`.
 To upgrade within 22.x later: re-extract a newer tarball into `/opt/node22` and
 `systemctl restart guessjockey`.
 
-`ffmpeg` is **not** required system-wide — `ffmpeg-static` pulls a Linux binary
-during `npm ci`. Build tools generally aren't needed either (`opusscript` is pure
-JS, AES-GCM uses Node's built-in crypto); add `build-essential python3` only if
-`npm ci` prints a node-gyp error for the optional DAVE dep.
+### ffmpeg (required)
+
+Install the system ffmpeg — the bot prefers it over the bundled `ffmpeg-static`,
+whose build can't open HTTPS URLs on some hosts:
+
+```bash
+sudo apt -y install ffmpeg
+ffmpeg -version | head -1     # 4.x or newer is fine
+```
+
+The bot logs which binary it chose at startup: `[ffmpeg] using: ffmpeg`. Set
+`FFMPEG_PATH=/usr/bin/ffmpeg` in `.env` to force a specific one.
+
+Build tools generally aren't needed (`opusscript` is pure JS, AES-GCM uses Node's
+built-in crypto); add `build-essential python3` only if `npm ci` prints a
+node-gyp error for the optional DAVE dep.
 
 ---
 
@@ -298,6 +310,7 @@ only if you're in hundreds of servers.
 | `systemd` fails with `203/EXEC` or `no such file` | `/opt/node22/bin/node` missing — redo §1, or fix `ExecStart` path in the unit. |
 | Service keeps restarting | `journalctl -u guessjockey -n 100 --no-pager` — usually a bad `.env` or missing dependency. |
 | Joins voice, no audio, `stuck at "connecting"` | UDP egress blocked. Check Linode Cloud Firewall outbound = Accept all; check `ufw` didn't add outbound rules. |
+| Joins voice, every round "hit a snag" | ffmpeg problem. `journalctl -u guessjockey \| grep ffmpeg` — usually `[ffmpeg] using:` points at the `ffmpeg-static` bundle. `apt -y install ffmpeg`, restart. |
 | `stuck at "signalling"` | Bot missing **Connect** in that voice channel, or `GuildVoiceStates` intent off. |
 | Commands don't show in Discord | Global registration lag (~1h first time), or set `DISCORD_GUILD_ID` to test instantly. |
 | Wrong clock → gateway auth fails | `timedatectl` — `System clock synchronized: yes`. |
